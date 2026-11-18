@@ -59,6 +59,11 @@ impl Ramdisk {
             && u32::from_le_bytes([compressed[0], compressed[1], compressed[2], compressed[3]]) == LZ4_LEGACY_MAGIC
         {
             lz4_legacy_decode(compressed).context("lz4 legacy decode")?
+        } else if compressed.len() >= 2 && compressed[0] == 0x1f && compressed[1] == 0x8b {
+            // Some stock builds pack the ramdisk with gzip.
+            let mut out = Vec::new();
+            flate2::read::GzDecoder::new(compressed).read_to_end(&mut out).context("gzip decode")?;
+            out
         } else {
             let mut out = Vec::new();
             lz4_flex::frame::FrameDecoder::new(compressed).read_to_end(&mut out).context("lz4 decode")?;

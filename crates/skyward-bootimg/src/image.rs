@@ -11,6 +11,16 @@ pub struct BootImage {
     pub header: HeaderV3,
     pub kernel: Vec<u8>,
     pub ramdisk: Vec<u8>,
+    /// The device tree blob a version 3 image may carry after its ramdisk,
+    /// as the kona platform's boot images do; empty when there is none.
+    pub dtb: Vec<u8>,
+}
+
+/// The magic a flattened device tree starts with, big-endian.
+const FDT_MAGIC: [u8; 4] = [0xd0, 0x0d, 0xfe, 0xed];
+
+fn align(at: usize) -> usize {
+    at.div_ceil(PAGE) * PAGE
 }
 
 fn section(bytes: &[u8], at: usize, len: u32, what: &str) -> Result<Vec<u8>> {
@@ -33,7 +43,17 @@ impl BootImage {
         };
         let kernel = section(bytes, HeaderV3::kernel_position(), header.kernel_size, "kernel")?;
         let ramdisk = section(bytes, header.ramdisk_position(), header.ramdisk_size, "ramdisk")?;
-        Ok(BootImage { header, kernel, ramdisk })
+        // A version 3 header carries no size for the device tree that may
+        // follow the ramdisk, so it is recognised by its own magic, which
+        // carries its total length.
+        let at = align(header.ramdisk_position() + header.ramdisk_size as usize);
+        let dtb = if bytes.len() >= at + 8 && bytes[at..at + 4] == FDT_MAGIC {
+            let total = u32::from_be_bytes([bytes[at + 4], bytes[at + 5], bytes[at + 6], bytes[at + 7]]) as usize;
+            section(bytes, at, total as u32, "device tree").unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        Ok(BootImage { header, kernel, ramdisk, dtb })
     }
 
     /// The image with sizes taken from its parts. A version 4 header keeps its
@@ -51,6 +71,12 @@ impl BootImage {
         pad(&mut out);
         out.extend_from_slice(&self.ramdisk);
         pad(&mut out);
+        // The bootloader reads the device tree from the boot partition on
+        // the phones that keep it there, so it travels with the image.
+        if !self.dtb.is_empty() {
+            out.extend_from_slice(&self.dtb);
+            pad(&mut out);
+        }
         Ok(out)
     }
 }
