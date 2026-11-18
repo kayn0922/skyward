@@ -1,0 +1,85 @@
+name: Build the enuma recovery
+
+# The tablet's package carries no recovery partition, so the stock image is
+# taken from `boot` instead of the packer's usual `recovery`. Everything
+# else is the upstream build: the same toolchain, the same packer.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock:
+        description: 'Stock build the image is made on'
+        required: true
+        default: 'OS1.0.3.0.TKZCNXM'
+
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    name: Recovery for enuma
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: Build the recovery service for the tablet
+        run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
+
+      - name: Build the second system's first program, static
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward-system-init --target-dir target/system-init
+
+      - name: Build the packer
+        run: cargo build --locked --release -p skyward-pack
+
+      - name: Gather the tools
+        run: |
+          mkdir -p tools
+          cp target/aarch64-linux-android/release/skyward tools/
+          cp target/system-init/aarch64-linux-android/release/system-init tools/
+          cp target/release/skyward-pack tools/
+          chmod +x tools/*
+
+      - name: Take the boot partition out of the stock package
+        run: |
+          python3 scripts/fetch_partition.py \
+            --config devices/enuma.toml --partition boot --out stock/boot.img
+
+      - name: Read the stock boot image
+        run: |
+          tools/skyward-pack list stock/boot.img > stock/list.txt
+          head -5 stock/list.txt
+          echo "entries: $(tail -1 stock/list.txt)"
+          if grep -q '^.*system/bin/recovery$' stock/list.txt; then
+            echo "OK: the ramdisk holds system/bin/recovery"
+          else
+            echo "::error::the stock ramdisk holds no system/bin/recovery"
+            grep -iE 'recovery|init' stock/list.txt | head -20
+            exit 1
+          fi
+
+      - name: Pack the recovery
+        run: |
+          name="skyward-enuma-${{ inputs.stock }}"
+          mkdir -p out
+          tools/skyward-pack recovery \
+            --stock stock/boot.img \
+            --binary tools/skyward \
+            --system-init tools/system-init \
+            --config devices/enuma.toml \
+            --font resources/fonts/MiSansVF.ttf \
+            --mono resources/fonts/KirkMono-Regular.ttf \
+            --mono-license resources/fonts/KirkMono-OFL.txt \
+            --out "out/$name.img"
+          cd out && zip -9 "$name.zip" "$name.img"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+        id: pack
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skyward-enuma
+          path: out/${{ steps.pack.outputs.name }}.zip
+          if-no-files-found: error
+          retention-days: 14

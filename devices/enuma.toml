@@ -1,0 +1,82 @@
+[device]
+codename = "enuma"
+brand = "Xiaomi"
+model = "Xiaomi Pad 5 Pro 5G"
+# No A/B slots: the tablet keeps one boot partition and no init_boot, and
+# its recovery is the ramdisk of that boot partition (recovery-as-boot).
+ab = false
+soc = { hans = "高通骁龙™ 870 5G 移动平台", hant = "高通驍龍™ 870 5G 行動平台", en = "Snapdragon® 870 5G Mobile Platform" }
+os_version_prop = "ro.mi.os.version.incremental"
+
+[display]
+# 11-inch 2560x1600 panel, MIUI's default 320 dpi.
+width = 1600
+height = 2560
+density = 320
+diagonal = 11.0
+corner_radius = 60
+
+[modules]
+# The tablet has no vendor_dlkm; its modules live on vendor and vendor_boot.
+sources = ["vendor_boot", "vendor"]
+# The touchscreen is Novatek NT36523 over SPI, built into the kernel
+# (CONFIG_TOUCHSCREEN_NT36523_HOSTDL_SPI=y) rather than shipped as a
+# module, so nothing has to be loaded for it.
+load = []
+
+# What /vendor/etc/init/vendor.xiaomi.hw.touchfeature@1.0-service.rc hands to
+# the system user, which the touch programs and Skyward's touch reading open
+# as that user. Only the nodes this tablet's drivers make are listed.
+[[owners]]
+user = "system"
+group = "system"
+mode = 0o664
+paths = [
+    "/dev/xiaomi-touch",
+    "/dev/xiaomi-touch-knock",
+    "/proc/tp_selftest",
+    "/proc/tp_hal_version",
+    "/proc/tp_fw_version",
+    "/proc/tp_lockdown_info",
+    "/sys/class/touch/touch_dev/gesture_single_tap_state",
+    "/sys/class/touch/touch_dev/touch_active_status",
+    "/sys/class/touch/touch_dev/touch_finger_status",
+    "/sys/class/touch/touch_dev/palm_sensor",
+    "/sys/class/touch/touch_dev/touch_thp_x_resolution",
+    "/sys/class/touch/touch_dev/touch_thp_y_resolution",
+    "/sys/class/touch/touch_dev/suspend_state",
+]
+
+[partitions]
+# Mounted where the tablet's own table mounts them, before the touch
+# driver's firmware and the Wi-Fi driver's settings are looked for.
+mounted = ["vendor", "odm", "persist"]
+
+# The Chinese system's update server.
+[update]
+server = "https://update.miui.com/updates/miotaV3.php"
+
+# The stock build this recovery is made on. The tablet's package carries no
+# recovery partition (its recovery is the boot partition's ramdisk), so the
+# build takes `boot` out of the payload instead, and `recovery` below is
+# that partition's SHA-256.
+[stock]
+version = "OS1.0.3.0.TKZCNXM"
+package = "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS1.0.3.0.TKZCNXM/miui_ENUMA_OS1.0.3.0.TKZCNXM_e1128c5324_13.0.zip"
+recovery = "49ca3a92e7222cec45bce2565567ccbb3715cc468158d0a73a4b6d6a1250616e"
+
+# The baseband's settings, with the IMEI, and the sensors' calibration.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+data_skipped = ["vendor/tzstorage", "vendor/qtee", "vendor/fingerprint"]
+
+[wipe]
+logs = [
+    "/data/miuilog",
+    "/data/vendor/diag",
+    "/data/vendor/log",
+    "/data/vendor/ramdump",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+    "/data/vendor/wlan_logs",
+]
