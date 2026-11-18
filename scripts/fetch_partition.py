@@ -217,8 +217,10 @@ def main():
             raise SystemExit('operation %d has type %d, which needs the old image' % (i, otype))
         pos = 0
         for start, num in extents:
-            image[start:start + num] = raw[pos:pos + num] if raw else b'\x00' * num
-            pos += num
+            # Extents count 4096-byte blocks, not bytes.
+            at, length = start * 4096, num * 4096
+            image[at:at + length] = raw[pos:pos + length] if raw else b'\x00' * length
+            pos += length
 
     got = hashlib.sha256(image).hexdigest()
     print('sha256 %s' % got)
