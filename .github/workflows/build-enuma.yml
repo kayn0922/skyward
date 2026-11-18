@@ -23,6 +23,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
 
+      - name: Install the reference lz4 the packer packs with
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lz4
+
       - name: Build the recovery service for the tablet
         run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
 
@@ -49,8 +52,18 @@ jobs:
 
       - name: Read the stock boot image
         run: |
+          python3 - <<'PY'
+          import struct
+          raw = open('stock/boot.img', 'rb').read()
+          print('magic', raw[:8])
+          kernel, ramdisk = struct.unpack_from('<II', raw, 8)
+          header_version = struct.unpack_from('<I', raw, 40)[0]
+          print('header v%d, kernel %d bytes, ramdisk %d bytes' % (header_version, kernel, ramdisk))
+          off = 4096 + ((kernel + 4095) // 4096) * 4096
+          print('ramdisk at %d, first bytes %s' % (off, raw[off:off + 8].hex()))
+          PY
           tools/skyward-pack list stock/boot.img > stock/list.txt
-          head -5 stock/list.txt
+          head -3 stock/list.txt
           echo "entries: $(tail -1 stock/list.txt)"
           if grep -q '^.*system/bin/recovery$' stock/list.txt; then
             echo "OK: the ramdisk holds system/bin/recovery"

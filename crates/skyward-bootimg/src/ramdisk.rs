@@ -52,8 +52,18 @@ impl Ramdisk {
     /// Unpack an LZ4 (legacy framing) compressed newc archive, as Android
     /// boot images carry.
     pub fn decode(compressed: &[u8]) -> Result<Self> {
-        let mut cpio = Vec::new();
-        lz4_flex::frame::FrameDecoder::new(compressed).read_to_end(&mut cpio).context("lz4 decode")?;
+        // AOSP packs the ramdisk the kernel's initramfs unpacker reads, in
+        // LZ4's legacy framing. The frame decoder below reads the newer
+        // framing only, so the legacy stream is unpacked here.
+        let cpio = if compressed.len() >= 4
+            && u32::from_le_bytes([compressed[0], compressed[1], compressed[2], compressed[3]]) == LZ4_LEGACY_MAGIC
+        {
+            lz4_legacy_decode(compressed).context("lz4 legacy decode")?
+        } else {
+            let mut out = Vec::new();
+            lz4_flex::frame::FrameDecoder::new(compressed).read_to_end(&mut out).context("lz4 decode")?;
+            out
+        };
         let mut entries = Vec::new();
         let mut rest = Cursor::new(cpio.as_slice());
         loop {
@@ -257,6 +267,31 @@ const LZ4_LEGACY_MAGIC: u32 = 0x184C_2102;
 /// The most a block of the legacy framing unpacks to; the kernel unpacks no
 /// more of one.
 const LZ4_LEGACY_BLOCK: usize = 8 << 20;
+
+/// `input` unpacked from LZ4's legacy framing: the magic number, then each
+/// block with the length of its compressed form before it, each unpacking to
+/// at most 8 MiB. This is what the kernel's initramfs unpacker reads, and
+/// what a stock boot image's ramdisk is packed in.
+fn lz4_legacy_decode(input: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut at = 4;
+    while at + 4 <= input.len() {
+        let len = u32::from_le_bytes([input[at], input[at + 1], input[at + 2], input[at + 3]]) as usize;
+        at += 4;
+        if len == 0 || at + len > input.len() {
+            break;
+        }
+        let mut block = vec![0u8; LZ4_LEGACY_BLOCK];
+        let written = lz4_flex::block::decompress_into(&input[at..at + len], &mut block)
+            .context("one block of the legacy stream")?;
+        out.extend_from_slice(&block[..written]);
+        at += len;
+    }
+    if out.is_empty() {
+        bail!("the legacy stream held no block");
+    }
+    Ok(out)
+}
 
 /// `input` compressed in LZ4's legacy framing, the one the kernel's initramfs
 /// unpacker reads: the magic number, then each 8 MiB of `input` as one LZ4
